@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Location Logger (GPS + Manual Click)</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #map { height: 400px; width: 100%; border: 1px solid #888; margin-top: 15px; }
+    select, button, textarea { font-size: 16px; padding: 5px; margin-top: 10px; }
+    #noteArea { display: none; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+<h2>📍 Location Logger</h2>
+
+<label for="type">Select Type:</label>
+<select id="type">
+  <option value="RV">RV</option>
+  <option value="TENT">TENT</option>
+  <option value="STREET ARMOR">STREET ARMOR</option>
+  <option value="WATER SOURCE">WATER SOURCE</option>
+  <option value="BATHROOM">BATHROOM</option>
+</select>
+
+<br>
+<button onclick="toggleNotes()">Add Notes</button>
+<div id="noteArea">
+  <label for="note">Notes:</label><br>
+  <textarea id="note" rows="3" cols="40" placeholder="Optional notes..."></textarea>
+</div>
+
+<br>
+<button onclick="submitCurrentLocation()">Submit Current Location</button>
+<button onclick="submitClickedLocation()">Submit Clicked Point</button>
+<p id="status"></p>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  let map, currentMarker, clickMarker, accuracyCircle;
+  let currentLat = null, currentLon = null;
+
+  const FORM_POST_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfSsjDS918E6xBcwdyaYF6_8THDgP5swtd7PHx9C6zgdRnC5g/formResponse";
+  const TYPE_ENTRY = "entry.1851045738";
+  const LAT_ENTRY = "entry.1397274582";
+  const LON_ENTRY = "entry.1788771684";
+  const NOTE_ENTRY = "entry.1863195655";
+
+  function initMap(lat, lon) {
+    map = L.map('map').setView([lat, lon], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    currentMarker = L.marker([lat, lon]).addTo(map)
+      .bindPopup("You are here").openPopup();
+
+    map.on("click", function(e) {
+      if (clickMarker) map.removeLayer(clickMarker);
+      clickMarker = L.marker(e.latlng, { draggable: true }).addTo(map)
+        .bindPopup("📌 Clicked Point").openPopup();
+    });
+  }
+
+  function updateCurrentLocation(lat, lon, accuracy) {
+    currentLat = lat;
+    currentLon = lon;
+    if (!map) {
+      initMap(lat, lon);
+    } else {
+      currentMarker.setLatLng([lat, lon]);
+      map.setView([lat, lon]);
+    }
+    if (accuracyCircle) map.removeLayer(accuracyCircle);
+    accuracyCircle = L.circle([lat, lon], {
+      radius: accuracy,
+      color: 'blue',
+      fillOpacity: 0.1
+    }).addTo(map);
+    document.getElementById("status").textContent =
+      `Live GPS: Lat ${lat.toFixed(5)}, Lon ${lon.toFixed(5)} (±${Math.round(accuracy)}m)`;
+  }
+
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(
+      pos => updateCurrentLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+      err => alert("Error getting location: " + err.message),
+      { enableHighAccuracy: true }
+    );
+  }
+
+  function toggleNotes() {
+    const area = document.getElementById("noteArea");
+    area.style.display = area.style.display === "none" ? "block" : "none";
+  }
+
+  function submitToForm(lat, lon) {
+    const type = document.getElementById("type").value;
+    const note = document.getElementById("note").value;
+
+    const formData = new FormData();
+    formData.append(TYPE_ENTRY, type);
+    formData.append(LAT_ENTRY, lat);
+    formData.append(LON_ENTRY, lon);
+    formData.append(NOTE_ENTRY, note);
+
+    fetch(FORM_POST_URL, {
+      method: "POST",
+      mode: "no-cors",
+      body: formData
+    }).then(() => {
+      document.getElementById("status").textContent = "✅ Submitted!";
+      document.getElementById("note").value = "";
+    }).catch(err => {
+      document.getElementById("status").textContent = "❌ Failed: " + err;
+    });
+  }
+
+  function submitCurrentLocation() {
+    if (currentLat === null || currentLon === null) {
+      document.getElementById("status").textContent = "⚠️ Current location not available.";
+      return;
+    }
+    submitToForm(currentLat, currentLon);
+  }
+
+  function submitClickedLocation() {
+    if (!clickMarker) {
+      document.getElementById("status").textContent = "⚠️ No point selected on map.";
+      return;
+    }
+    const { lat, lng } = clickMarker.getLatLng();
+    submitToForm(lat, lng);
+  }
+</script>
+</body>
+</html>
