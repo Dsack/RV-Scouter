@@ -64,10 +64,14 @@
       .bindPopup("You are here").openPopup();
 
     map.on("click", function(e) {
-      const marker = L.marker(e.latlng, { draggable: true }).addTo(map)
-        .bindPopup("📌 Clicked Point").openPopup();
+      const marker = L.marker(e.latlng, { draggable: true }).addTo(map);
 
-      marker.on("contextmenu", () => confirmAndDelete(marker));
+      // On click, show popup with type & note from inputs
+      marker.on("click", () => {
+        const type = document.getElementById("type").value;
+        const note = document.getElementById("note").value;
+        marker.bindPopup(`<strong>${type}</strong><br>${note}`).openPopup();
+      });
 
       undoStack.push({ action: 'add', layer: marker });
       clickMarker = marker;
@@ -86,10 +90,10 @@
             const type = props.type || "UNKNOWN";
             const desc = props.description || "";
 
-            layer.bindPopup(`<strong>${type}</strong><br>${desc}`);
-            if (feature.geometry.type === "Point") {
-              layer.on("contextmenu", () => confirmAndDelete(layer));
-            }
+            // Show popup on click with properties
+            layer.on("click", () => {
+              layer.bindPopup(`<strong>${type}</strong><br>${desc}`).openPopup();
+            });
           },
           pointToLayer: function (feature, latlng) {
             return L.marker(latlng, { draggable: true });
@@ -140,14 +144,6 @@
     alert("Geolocation is not supported.");
   }
 
-  function confirmAndDelete(marker) {
-    if (confirm("Delete this marker?")) {
-      map.removeLayer(marker);
-      undoStack.push({ action: "delete", layer: marker });
-      if (clickMarker === marker) clickMarker = null;
-    }
-  }
-
   function undo() {
     if (undoStack.length === 0) {
       alert("Nothing to undo.");
@@ -159,10 +155,6 @@
     if (last.action === "add") {
       map.removeLayer(last.layer);
       if (clickMarker === last.layer) clickMarker = null;
-    } else if (last.action === "delete") {
-      last.layer.addTo(map);
-      last.layer.on("contextmenu", () => confirmAndDelete(last.layer));
-      clickMarker = last.layer;
     }
   }
 
