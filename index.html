@@ -1,77 +1,3 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title> RV Location Logger (GPS + Manual Click)</title>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <style>
-    body { font-family: sans-serif; padding: 20px; }
-    #map { height: 400px; width: 100%; border: 1px solid #888; margin-top: 15px; }
-    select, button, textarea { font-size: 16px; padding: 5px; margin-top: 10px; }
-    #noteArea { display: none; margin-top: 10px; }
-  </style>
-</head>
-<body>
-
-<h2>📍RV Location Logger</h2>
-
-<label for="type">Select Type:</label>
-<select id="type">
-  <option value="RV">RV</option>
-  <option value="TENT">TENT</option>
-  <option value="STREET ARMOR">STREET ARMOR</option>
-  <option value="WATER SOURCE">WATER SOURCE</option>
-  <option value="BATHROOM">BATHROOM</option>
-</select>
-
-<br>
-<button onclick="toggleNotes()">Add Notes</button>
-<div id="noteArea">
-  <label for="note">Notes:</label><br>
-  <textarea id="note" rows="3" cols="40" placeholder="Optional notes..."></textarea>
-</div>
-
-<br>
-<button onclick="submitCurrentLocation()">Submit Current Location</button>
-<button onclick="submitClickedLocation()">Submit Clicked Point</button>
-<p id="status"></p>
-
-<div id="map"></div>
-
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script>
-  fetch("data.geojson")
-  .then(res => {
-    if (!res.ok) throw new Error("Network response was not ok");
-    return res.json();
-  })
-  .then(data => {
-    console.log("Loaded GeoJSON:", data); // Add this
-    L.geoJSON(data, {
-      onEachFeature: function (feature, layer) {
-        const props = feature.properties;
-        const type = props.type || 'UNKNOWN';
-        const desc = props.description || '';
-
-        layer.bindPopup(`<strong>${type}</strong><br>${desc}`);
-        layer.on("dragend", function (e) {
-          const { lat, lng } = e.target.getLatLng();
-          console.log(`Moved to: ${lat}, ${lng}`);
-        });
-        layer.on("contextmenu", function () {
-          map.removeLayer(layer);
-        });
-      },
-      pointToLayer: function (feature, latlng) {
-        return L.marker(latlng, { draggable: true });
-      }
-    }).addTo(map);
-  })
-  .catch(err => {
-    console.error("Error loading GeoJSON:", err);
-  });
- 
 <script>
   let map, currentMarker, clickMarker, accuracyCircle;
   let currentLat = null, currentLon = null;
@@ -96,6 +22,37 @@
       if (clickMarker) map.removeLayer(clickMarker);
       clickMarker = L.marker(e.latlng, { draggable: true }).addTo(map)
         .bindPopup("📌 Clicked Point").openPopup();
+    });
+
+    // Now that the map exists, load your GeoJSON
+    fetch("data.geojson")
+    .then(res => {
+      if (!res.ok) throw new Error("Network response was not ok");
+      return res.json();
+    })
+    .then(data => {
+      L.geoJSON(data, {
+        onEachFeature: function (feature, layer) {
+          const props = feature.properties;
+          const type = props.type || 'UNKNOWN';
+          const desc = props.description || '';
+          layer.bindPopup(`<strong>${type}</strong><br>${desc}`);
+
+          layer.on("dragend", function (e) {
+            const { lat, lng } = e.target.getLatLng();
+            console.log(`Moved to: ${lat}, ${lng}`);
+          });
+          layer.on("contextmenu", function () {
+            map.removeLayer(layer);
+          });
+        },
+        pointToLayer: function (feature, latlng) {
+          return L.marker(latlng, { draggable: true });
+        }
+      }).addTo(map);
+    })
+    .catch(err => {
+      console.error("Error loading GeoJSON:", err);
     });
   }
 
@@ -170,5 +127,3 @@
     submitToForm(lat, lng);
   }
 </script>
-</body>
-</html>
