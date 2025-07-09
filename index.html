@@ -1,218 +1,102 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>RV Location Logger (GPS + Manual Click)</title>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet/dist/leaflet.css"
-  />
-  <style>
-    body {
-      font-family: sans-serif;
-      padding: 20px;
-    }
-    #map {
-      height: 400px;
-      width: 100%;
-      border: 1px solid #888;
-      margin-top: 15px;
-    }
-    select,
-    button,
-    textarea {
-      font-size: 16px;
-      padding: 5px;
-      margin-top: 10px;
-    }
-    #noteArea {
-      display: none;
-      margin-top: 10px;
-    }
-  </style>
-</head>
-<body>
-  <h2>📍RV Location Logger</h2>
+<button onclick="undo()">Undo Last Action</button>
+<div id="map" style="height:400px;"></div>
 
-  <label for="type">Select Type:</label>
-  <select id="type">
-    <option value="RV">RV</option>
-    <option value="TENT">TENT</option>
-    <option value="STREET ARMOR">STREET ARMOR</option>
-    <option value="WATER SOURCE">WATER SOURCE</option>
-    <option value="BATHROOM">BATHROOM</option>
-  </select>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  let map, currentMarker, clickMarker, accuracyCircle;
+  let currentLat = null, currentLon = null;
 
-  <br />
-  <button onclick="toggleNotes()">Add Notes</button>
-  <div id="noteArea">
-    <label for="note">Notes:</label><br />
-    <textarea
-      id="note"
-      rows="3"
-      cols="40"
-      placeholder="Optional notes..."
-    ></textarea>
-  </div>
+  // Undo stack stores { action: "add"|"delete", layer: marker }
+  let undoStack = [];
 
-  <br />
-  <button onclick="submitCurrentLocation()">Submit Current Location</button>
-  <button onclick="submitClickedLocation()">Submit Clicked Point</button>
-  <p id="status"></p>
+  function initMap(lat, lon) {
+    map = L.map('map').setView([lat, lon], 15);
 
-  <div id="map"></div>
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
 
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script>
-    let map, currentMarker, clickMarker, accuracyCircle;
-    let currentLat = null,
-      currentLon = null;
+    // Add current location marker
+    currentMarker = L.marker([lat, lon]).addTo(map)
+      .bindPopup("You are here").openPopup();
+    
+    // We don't undo GPS marker moves to keep it simple,
+    // only manual markers are tracked
 
-    const FORM_POST_URL =
-      "https://docs.google.com/forms/d/e/1FAIpQLSfSsjDS918E6xBcwdyaYF6_8THDgP5swtd7PHx9C6zgdRnC5g/formResponse";
-    const TYPE_ENTRY = "entry.1851045738";
-    const LAT_ENTRY = "entry.1397274582";
-    const LON_ENTRY = "entry.1788771684";
-    const NOTE_ENTRY = "entry.1863195655";
-
-    function initMap(lat, lon) {
-      map = L.map("map").setView([lat, lon], 15);
-
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "© OpenStreetMap contributors",
-      }).addTo(map);
-
-      currentMarker = L.marker([lat, lon])
-        .addTo(map)
-        .bindPopup("You are here")
-        .openPopup();
-
-      map.on("click", function (e) {
-        if (clickMarker) map.removeLayer(clickMarker);
-        clickMarker = L.marker(e.latlng, { draggable: true })
-          .addTo(map)
-          .bindPopup("📌 Clicked Point")
-          .openPopup();
-      });
-
-      // Load GeoJSON after map is initialized
-      fetch("data.geojson")
-        .then((res) => {
-          if (!res.ok) throw new Error("Network response was not ok");
-          return res.json();
-        })
-        .then((data) => {
-          L.geoJSON(data, {
-            onEachFeature: function (feature, layer) {
-              const props = feature.properties || {};
-              const type = props.type || "UNKNOWN";
-              const desc = props.description || "";
-
-              layer.bindPopup(`<strong>${type}</strong><br>${desc}`);
-
-              layer.on("dragend", function (e) {
-                const { lat, lng } = e.target.getLatLng();
-                console.log(`Moved to: ${lat}, ${lng}`);
-              });
-
-              layer.on("contextmenu", function () {
-                map.removeLayer(layer);
-              });
-            },
-            pointToLayer: function (feature, latlng) {
-              return L.marker(latlng, { draggable: true });
-            },
-          }).addTo(map);
-        })
-        .catch((err) => {
-          console.error("Error loading GeoJSON:", err);
-        });
-    }
-
-    function updateCurrentLocation(lat, lon, accuracy) {
-      currentLat = lat;
-      currentLon = lon;
-      if (!map) {
-        initMap(lat, lon);
-      } else {
-        currentMarker.setLatLng([lat, lon]);
-        map.setView([lat, lon]);
+    // Add click handler to place draggable marker
+    map.on("click", function(e) {
+      if (clickMarker) {
+        // Removing old clicked marker triggers undo record for delete
+        deleteMarker(clickMarker);
       }
-      if (accuracyCircle) map.removeLayer(accuracyCircle);
-      accuracyCircle = L.circle([lat, lon], {
-        radius: accuracy,
-        color: "blue",
-        fillOpacity: 0.1,
-      }).addTo(map);
-      document.getElementById("status").textContent = `Live GPS: Lat ${lat.toFixed(
-        5
-      )}, Lon ${lon.toFixed(5)} (±${Math.round(accuracy)}m)`;
-    }
+      clickMarker = L.marker(e.latlng, { draggable: true }).addTo(map)
+        .bindPopup("📌 Clicked Point").openPopup();
 
-    if (navigator.geolocation) {
-      navigator.geolocation.watchPosition(
-        (pos) =>
-          updateCurrentLocation(
-            pos.coords.latitude,
-            pos.coords.longitude,
-            pos.coords.accuracy
-          ),
-        (err) => alert("Error getting location: " + err.message),
-        { enableHighAccuracy: true }
-      );
+      // Track this add
+      undoStack.push({ action: 'add', layer: clickMarker });
+
+      // Optional: On drag end, update popup or something else here
+    });
+  }
+
+  // Deletes a marker with confirmation, pushes delete action to undo stack
+  function deleteMarker(marker) {
+    if (!confirm("Are you sure you want to delete this marker?")) return;
+    map.removeLayer(marker);
+    undoStack.push({ action: 'delete', layer: marker });
+  }
+
+  // Undo last add or delete
+  function undo() {
+    if (undoStack.length === 0) {
+      alert("Nothing to undo.");
+      return;
+    }
+    const lastAction = undoStack.pop();
+
+    if (lastAction.action === 'add') {
+      // Undo add = remove the marker from map
+      map.removeLayer(lastAction.layer);
+      // If this was clickMarker, clear it
+      if (lastAction.layer === clickMarker) {
+        clickMarker = null;
+      }
+    } else if (lastAction.action === 'delete') {
+      // Undo delete = add the marker back to map
+      lastAction.layer.addTo(map);
+      // If it's a clicked marker, reassign clickMarker
+      clickMarker = lastAction.layer;
+    }
+  }
+
+  // Update the GPS location marker; this one is NOT tracked for undo
+  function updateCurrentLocation(lat, lon, accuracy) {
+    currentLat = lat;
+    currentLon = lon;
+    if (!map) {
+      initMap(lat, lon);
     } else {
-      alert("Geolocation is not supported by your browser.");
+      currentMarker.setLatLng([lat, lon]);
+      map.setView([lat, lon]);
     }
+    if (accuracyCircle) map.removeLayer(accuracyCircle);
+    accuracyCircle = L.circle([lat, lon], {
+      radius: accuracy,
+      color: 'blue',
+      fillOpacity: 0.1
+    }).addTo(map);
+    document.getElementById("status").textContent =
+      `Live GPS: Lat ${lat.toFixed(5)}, Lon ${lon.toFixed(5)} (±${Math.round(accuracy)}m)`;
+  }
 
-    function toggleNotes() {
-      const area = document.getElementById("noteArea");
-      area.style.display = area.style.display === "none" ? "block" : "none";
-    }
-
-    function submitToForm(lat, lon) {
-      const type = document.getElementById("type").value;
-      const note = document.getElementById("note").value;
-
-      const formData = new FormData();
-      formData.append(TYPE_ENTRY, type);
-      formData.append(LAT_ENTRY, lat);
-      formData.append(LON_ENTRY, lon);
-      formData.append(NOTE_ENTRY, note);
-
-      fetch(FORM_POST_URL, {
-        method: "POST",
-        mode: "no-cors",
-        body: formData,
-      })
-        .then(() => {
-          document.getElementById("status").textContent = "✅ Submitted!";
-          document.getElementById("note").value = "";
-        })
-        .catch((err) => {
-          document.getElementById("status").textContent = "❌ Failed: " + err;
-        });
-    }
-
-    function submitCurrentLocation() {
-      if (currentLat === null || currentLon === null) {
-        document.getElementById("status").textContent =
-          "⚠️ Current location not available.";
-        return;
-      }
-      submitToForm(currentLat, currentLon);
-    }
-
-    function submitClickedLocation() {
-      if (!clickMarker) {
-        document.getElementById("status").textContent =
-          "⚠️ No point selected on map.";
-        return;
-      }
-      const { lat, lng } = clickMarker.getLatLng();
-      submitToForm(lat, lng);
-    }
-  </script>
-</body>
-</html>
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(
+      pos => updateCurrentLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+      err => alert("Error getting location: " + err.message),
+      { enableHighAccuracy: true }
+    );
+  } else {
+    alert("Geolocation is not supported by your browser.");
+  }
+</script>
