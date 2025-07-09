@@ -40,10 +40,13 @@
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script>
 fetch("data.geojson")
-  .then(res => res.json())
+  .then(res => {
+    if (!res.ok) throw new Error("Network response was not ok");
+    return res.json();
+  })
   .then(data => {
+    console.log("Loaded GeoJSON:", data); // Add this
     L.geoJSON(data, {
       onEachFeature: function (feature, layer) {
         const props = feature.properties;
@@ -63,8 +66,10 @@ fetch("data.geojson")
         return L.marker(latlng, { draggable: true });
       }
     }).addTo(map);
+  })
+  .catch(err => {
+    console.error("Error loading GeoJSON:", err);
   });
-</script>
 <script>
   let map, currentMarker, clickMarker, accuracyCircle;
   let currentLat = null, currentLon = null;
