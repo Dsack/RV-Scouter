@@ -1,368 +1,230 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>RV Location Logger (Styled by Type)</title>
+  <title>RV Location Logger (Unified Pins + Colored + Legend)</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet/dist/leaflet.css"
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
-    body {
-      font-family: sans-serif;
-      padding: 20px;
-    }
-    #map {
-      height: 400px;
-      width: 100%;
-      border: 1px solid #888;
-      margin-top: 15px;
-    }
-    select,
-    button,
-    textarea {
-      font-size: 16px;
-      padding: 5px;
-      margin-top: 10px;
-    }
-    #noteArea {
-      display: none;
-      margin-top: 10px;
-    }
+    body { font-family: sans-serif; padding: 20px; }
+    #map { height: 500px; width: 100%; border: 1px solid #888; margin-top: 15px; }
+    select, button, textarea { font-size: 16px; padding: 5px; margin-top: 10px; }
+    #noteArea { display: none; margin-top: 10px; }
     .delete-btn {
-      margin-top: 8px;
-      background-color: #e74c3c;
-      color: white;
-      border: none;
-      padding: 6px 12px;
-      cursor: pointer;
-      border-radius: 3px;
+      margin-top: 8px; background-color: #e74c3c; color: white;
+      border: none; padding: 6px 12px; cursor: pointer; border-radius: 3px;
     }
-    .delete-btn:hover {
-      background-color: #c0392b;
+    .delete-btn:hover { background-color: #c0392b; }
+    .legend {
+      background: white; padding: 10px; font-size: 14px;
+      border-radius: 5px; line-height: 1.4; box-shadow: 0 0 8px rgba(0,0,0,0.2);
+      position: absolute; bottom: 30px; left: 10px; z-index: 1000;
     }
+    .legend i { width: 14px; height: 14px; float: left; margin-right: 8px; opacity: 0.9; }
   </style>
 </head>
 <body>
-
 <h2>📍RV Location Logger</h2>
-
 <label for="type">Select Type:</label>
 <select id="type">
-  <option value="RV">RV (Confirmed Location)</option>
-  <option value="TENT">Tent</option>
-  <option value="STREET_ARMOR">Street Armor</option>
-  <option value="WATER_SOURCE">Water Source</option>
-  <option value="BATHROOM">Bathroom</option>
-  <option value="WATER_INSECURITY">Water Insecurity</option>
+  <option value="RV">RV</option>
+  <option value="TENT">TENT</option>
+  <option value="STREET_ARMOR">STREET_ARMOR</option>
+  <option value="WATER_INSECURITY">WATER_INSECURITY</option>
+  <option value="BATHROOM">BATHROOM</option>
   <option value="CSR">CSR</option>
-  <option value="STARTING_POINT">Starting Point</option>
-  <option value="SCOUT_POINT">Scout Point</option>
-  <option value="DOG_POINT">Dog Point</option>
+  <option value="STARTING_POINT">STARTING_POINT</option>
+  <option value="SCOUT_POINT">SCOUT_POINT</option>
+  <option value="DOG_POINT">DOG_POINT</option>
 </select>
-
-<br />
+<br>
 <button onclick="toggleNotes()">Add Notes</button>
 <div id="noteArea">
-  <label for="note">Notes:</label><br />
-  <textarea
-    id="note"
-    rows="3"
-    cols="40"
-    placeholder="Optional notes..."
-  ></textarea>
+  <label for="note">Notes:</label><br>
+  <textarea id="note" rows="3" cols="40" placeholder="Optional notes..."></textarea>
 </div>
-
-<br />
+<br>
 <button onclick="submitCurrentLocation()">Submit Current Location</button>
 <button onclick="submitClickedLocation()">Submit Clicked Point</button>
 <button onclick="undo()">Undo Last Action</button>
 <p id="status"></p>
-
 <div id="map"></div>
-
+<div class="legend" id="legend"></div>
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
-  let map,
-    currentMarker,
-    clickMarker,
-    accuracyCircle;
-  let currentLat = null,
-    currentLon = null;
-  let undoStack = [];
+const typeColors = {
+  "RV": "red",
+  "TENT": "green",
+  "STREET_ARMOR": "orange",
+  "WATER_INSECURITY": "blue",
+  "BATHROOM": "purple",
+  "CSR": "teal",
+  "STARTING_POINT": "black",
+  "SCOUT_POINT": "gray",
+  "DOG_POINT": "brown"
+};
 
-  let geoJsonGroup = null;
-  const geoJsonLayers = new Map();
+let map, currentMarker, clickMarker, accuracyCircle;
+let currentLat = null, currentLon = null;
+let undoStack = [];
 
-  const FORM_POST_URL =
-    "https://docs.google.com/forms/d/e/1FAIpQLSfSsjDS918E6xBcwdyaYF6_8THDgP5swtd7PHx9C6zgdRnC5g/formResponse";
-  const TYPE_ENTRY = "entry.1851045738";
-  const LAT_ENTRY = "entry.1397274582";
-  const LON_ENTRY = "entry.1788771684";
-  const NOTE_ENTRY = "entry.1863195655";
+function getColoredIcon(type) {
+  const color = typeColors[type] || "gray";
+  return new L.Icon({
+    iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+  });
+}
 
-  // Define colors by type for points and polygons/lines
-  const typeStyles = {
-    RV: { color: "green", fillColor: "green" },
-    TENT: { color: "orange", fillColor: "orange" },
-    STREET_ARMOR: { color: "purple", fillColor: "purple" },
-    WATER_SOURCE: { color: "blue", fillColor: "blue" },
-    BATHROOM: { color: "brown", fillColor: "brown" },
-    WATER_INSECURITY: { color: "red", fillColor: "red" },
-    CSR: { color: "cyan", fillColor: "cyan" },
-    STARTING_POINT: { color: "magenta", fillColor: "magenta" },
-    SCOUT_POINT: { color: "darkgreen", fillColor: "darkgreen" },
-    DOG_POINT: { color: "black", fillColor: "black" },
-    UNKNOWN: { color: "gray", fillColor: "gray" },
-  };
+function bindPopupWithDelete(marker, type, note) {
+  const safeNote = note ? note.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") : "";
+  const popupContent = `
+    <strong>${type}</strong><br>
+    ${safeNote}
+    <br><button class="delete-btn" data-id="${marker._leaflet_id}">Delete</button>
+  `;
+  marker.bindPopup(popupContent);
+}
 
-  // Create colored circle markers for points based on type
-  function createColoredMarker(latlng, type) {
-    const style = typeStyles[type] || typeStyles.UNKNOWN;
-    return L.circleMarker(latlng, {
-      radius: 8,
-      color: style.color,
-      fillColor: style.fillColor,
-      fillOpacity: 0.8,
-      weight: 2,
-      draggable: true,
-    });
+function deleteMarker(id) {
+  const layer = map._layers[id];
+  if (layer) {
+    map.removeLayer(layer);
+    undoStack = undoStack.filter(item => item.layer._leaflet_id !== id);
+    if (clickMarker && clickMarker._leaflet_id === id) clickMarker = null;
+    document.getElementById("status").textContent = "🗑️ Marker deleted.";
   }
+}
 
-  function bindPopupWithDelete(marker, type, note) {
-    const safeNote = note
-      ? note.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")
-      : "";
-    const popupContent = `
-      <strong>${type}</strong><br>
-      ${safeNote}
-      <br><button class="delete-btn" data-id="${marker._leaflet_id}">Delete</button>
-    `;
-    marker.bindPopup(popupContent);
-  }
+function initMap(lat, lon) {
+  map = L.map('map').setView([lat, lon], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
 
-  function deleteMarker(id) {
-    let layer = map._layers[id];
+  currentMarker = L.marker([lat, lon]).addTo(map)
+    .bindPopup("You are here").openPopup();
 
-    if (!layer && geoJsonLayers.has(id)) {
-      layer = geoJsonLayers.get(id);
-    }
-
-    if (layer) {
-      if (geoJsonGroup && geoJsonGroup.hasLayer(layer)) {
-        geoJsonGroup.removeLayer(layer);
-        geoJsonLayers.delete(id);
-      } else {
-        map.removeLayer(layer);
-      }
-
-      undoStack = undoStack.filter((item) => item.layer._leaflet_id !== id);
-
-      if (clickMarker && clickMarker._leaflet_id === id) clickMarker = null;
-      document.getElementById("status").textContent = "🗑️ Marker deleted.";
-    } else {
-      console.warn("Marker to delete not found:", id);
-    }
-  }
-
-  function initMap(lat, lon) {
-    map = L.map("map").setView([lat, lon], 15);
-
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "© OpenStreetMap contributors",
-    }).addTo(map);
-
-    currentMarker = L.marker([lat, lon])
-      .addTo(map)
-      .bindPopup("You are here")
-      .openPopup();
-
-    map.on("click", function (e) {
-      const type = document.getElementById("type").value;
-      const note = document.getElementById("note").value;
-
-      // Use colored circle marker instead of default marker
-      const marker = createColoredMarker(e.latlng, type).addTo(map);
-      bindPopupWithDelete(marker, type, note);
-      marker.openPopup();
-
-      undoStack.push({ action: "add", layer: marker });
-      clickMarker = marker;
-    });
-
-    map.on("popupopen", function (e) {
-      const popupNode = e.popup._contentNode;
-      const deleteBtn = popupNode.querySelector(".delete-btn");
-      if (deleteBtn) {
-        deleteBtn.replaceWith(deleteBtn.cloneNode(true));
-        const newDeleteBtn = popupNode.querySelector(".delete-btn");
-        newDeleteBtn.addEventListener(
-          "click",
-          function () {
-            const id = this.getAttribute("data-id");
-            deleteMarker(parseInt(id, 10));
-            map.closePopup();
-          },
-          { once: true }
-        );
-      }
-    });
-
-    fetch("data.geojson")
-      .then((res) => {
-        if (!res.ok) throw new Error("GeoJSON load failed");
-        return res.json();
-      })
-      .then((data) => {
-        geoJsonGroup = L.geoJSON(data, {
-          onEachFeature: function (feature, layer) {
-            const props = feature.properties || {};
-            const type = props.type || "UNKNOWN";
-            const desc = props.description || "";
-
-            if (feature.geometry.type === "Point") {
-              // Replace default marker with colored circle marker
-              const latlng = layer.getLatLng();
-              map.removeLayer(layer);
-              const coloredMarker = createColoredMarker(latlng, type).addTo(map);
-              bindPopupWithDelete(coloredMarker, type, desc);
-              geoJsonLayers.set(coloredMarker._leaflet_id, coloredMarker);
-            } else if (
-              feature.geometry.type === "Polygon" ||
-              feature.geometry.type === "MultiPolygon"
-            ) {
-              // Polygon style by type
-              layer.setStyle({
-                color: typeStyles[type]?.color || "gray",
-                fillOpacity: 0.3,
-              });
-              layer.addTo(map);
-            } else if (
-              feature.geometry.type === "LineString" ||
-              feature.geometry.type === "MultiLineString"
-            ) {
-              // Line style by type
-              layer.setStyle({
-                color: typeStyles[type]?.color || "gray",
-                weight: 4,
-              });
-              layer.addTo(map);
-            }
-          },
-          pointToLayer: function (feature, latlng) {
-            // We handle points manually in onEachFeature above to apply colors
-            return L.marker(latlng);
-          },
-        }).addTo(map);
-      })
-      .catch((err) => {
-        console.error("Error loading GeoJSON:", err);
-      });
-  }
-
-  function updateCurrentLocation(lat, lon, accuracy) {
-    currentLat = lat;
-    currentLon = lon;
-
-    if (!map) {
-      initMap(lat, lon);
-    } else {
-      currentMarker.setLatLng([lat, lon]);
-      map.setView([lat, lon]);
-    }
-
-    if (accuracyCircle) map.removeLayer(accuracyCircle);
-    accuracyCircle = L.circle([lat, lon], {
-      radius: accuracy,
-      color: "blue",
-      fillOpacity: 0.1,
-    }).addTo(map);
-
-    document.getElementById(
-      "status"
-    ).textContent = `Live GPS: Lat ${lat.toFixed(
-      5
-    )}, Lon ${lon.toFixed(5)} (±${Math.round(accuracy)}m)`;
-  }
-
-  if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(
-      (pos) =>
-        updateCurrentLocation(
-          pos.coords.latitude,
-          pos.coords.longitude,
-          pos.coords.accuracy
-        ),
-      (err) => alert("Error getting location: " + err.message),
-      { enableHighAccuracy: true }
-    );
-  } else {
-    alert("Geolocation is not supported.");
-  }
-
-  function undo() {
-    if (undoStack.length === 0) {
-      alert("Nothing to undo.");
-      return;
-    }
-
-    const last = undoStack.pop();
-
-    if (last.action === "add") {
-      map.removeLayer(last.layer);
-      if (clickMarker === last.layer) clickMarker = null;
-      document.getElementById("status").textContent = "↩️ Undo: Marker removed.";
-    }
-  }
-
-  function toggleNotes() {
-    const area = document.getElementById("noteArea");
-    area.style.display = area.style.display === "none" ? "block" : "none";
-  }
-
-  function submitToForm(lat, lon) {
+  map.on("click", function(e) {
     const type = document.getElementById("type").value;
     const note = document.getElementById("note").value;
+    const marker = L.marker(e.latlng, { icon: getColoredIcon(type), draggable: true }).addTo(map);
+    bindPopupWithDelete(marker, type, note);
+    marker.openPopup();
+    undoStack.push({ action: 'add', layer: marker });
+    clickMarker = marker;
+  });
 
-    const formData = new FormData();
-    formData.append(TYPE_ENTRY, type);
-    formData.append(LAT_ENTRY, lat);
-    formData.append(LON_ENTRY, lon);
-    formData.append(NOTE_ENTRY, note);
-
-    fetch(FORM_POST_URL, {
-      method: "POST",
-      mode: "no-cors",
-      body: formData,
-    })
-      .then(() => {
-        document.getElementById("status").textContent = "✅ Submitted!";
-        document.getElementById("note").value = "";
-      })
-      .catch((err) => {
-        document.getElementById("status").textContent = "❌ Failed: " + err;
+  map.on("popupopen", function(e) {
+    const popupNode = e.popup._contentNode;
+    const deleteBtn = popupNode.querySelector('.delete-btn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', function() {
+        deleteMarker(parseInt(this.getAttribute('data-id')));
+        map.closePopup();
       });
-  }
-
-  function submitCurrentLocation() {
-    if (currentLat === null || currentLon === null) {
-      document.getElementById("status").textContent =
-        "⚠️ Current location not available.";
-      return;
     }
-    submitToForm(currentLat, currentLon);
-  }
+  });
 
-  function submitClickedLocation() {
-    if (!clickMarker) {
-      document.getElementById("status").textContent = "⚠️ No point selected on map.";
-      return;
-    }
-    const { lat, lng } = clickMarker.getLatLng();
-    submitToForm(lat, lng);
+  fetch("rv_locations.geojson")
+    .then(res => res.json())
+    .then(data => {
+      L.geoJSON(data, {
+        pointToLayer: function (feature, latlng) {
+          const type = feature.properties.type;
+          const note = feature.properties.description;
+          const marker = L.marker(latlng, {
+            icon: getColoredIcon(type),
+            draggable: true
+          });
+          bindPopupWithDelete(marker, type, note);
+          return marker;
+        }
+      }).addTo(map);
+    });
+
+  const legend = document.getElementById("legend");
+  legend.innerHTML = Object.entries(typeColors).map(([type, color]) =>
+    `<div><i style="background:${color}"></i>${type.replace(/_/g, ' ')}</div>`
+  ).join("");
+}
+
+function updateCurrentLocation(lat, lon, accuracy) {
+  currentLat = lat;
+  currentLon = lon;
+  if (!map) initMap(lat, lon);
+  else {
+    currentMarker.setLatLng([lat, lon]);
+    map.setView([lat, lon]);
   }
+  if (accuracyCircle) map.removeLayer(accuracyCircle);
+  accuracyCircle = L.circle([lat, lon], {
+    radius: accuracy, color: 'blue', fillOpacity: 0.1
+  }).addTo(map);
+  document.getElementById("status").textContent = `Live GPS: Lat ${lat.toFixed(5)}, Lon ${lon.toFixed(5)} (±${Math.round(accuracy)}m)`;
+}
+
+function toggleNotes() {
+  const area = document.getElementById("noteArea");
+  area.style.display = area.style.display === "none" ? "block" : "none";
+}
+
+function submitToForm(lat, lon) {
+  const type = document.getElementById("type").value;
+  const note = document.getElementById("note").value;
+  const formData = new FormData();
+  formData.append("entry.1851045738", type);
+  formData.append("entry.1397274582", lat);
+  formData.append("entry.1788771684", lon);
+  formData.append("entry.1863195655", note);
+  fetch("https://docs.google.com/forms/d/e/1FAIpQLSfSsjDS918E6xBcwdyaYF6_8THDgP5swtd7PHx9C6zgdRnC5g/formResponse", {
+    method: "POST",
+    mode: "no-cors",
+    body: formData
+  }).then(() => {
+    document.getElementById("status").textContent = "✅ Submitted!";
+    document.getElementById("note").value = "";
+  });
+}
+
+function submitCurrentLocation() {
+  if (currentLat !== null && currentLon !== null) submitToForm(currentLat, currentLon);
+  else document.getElementById("status").textContent = "⚠️ Current location not available.";
+}
+
+function submitClickedLocation() {
+  if (!clickMarker) {
+    document.getElementById("status").textContent = "⚠️ No point selected on map.";
+    return;
+  }
+  const { lat, lng } = clickMarker.getLatLng();
+  submitToForm(lat, lng);
+}
+
+function undo() {
+  if (undoStack.length === 0) return alert("Nothing to undo.");
+  const last = undoStack.pop();
+  if (last.action === "add") {
+    map.removeLayer(last.layer);
+    if (clickMarker === last.layer) clickMarker = null;
+    document.getElementById("status").textContent = "↩️ Undo: Marker removed.";
+  }
+}
+
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(
+    pos => updateCurrentLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+    err => alert("Error getting location: " + err.message),
+    { enableHighAccuracy: true }
+  );
+} else {
+  alert("Geolocation is not supported.");
+}
 </script>
 </body>
 </html>
