@@ -40,6 +40,31 @@
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+fetch("data.geojson")
+  .then(res => res.json())
+  .then(data => {
+    L.geoJSON(data, {
+      onEachFeature: function (feature, layer) {
+        const props = feature.properties;
+        const type = props.type || 'UNKNOWN';
+        const desc = props.description || '';
+
+        layer.bindPopup(`<strong>${type}</strong><br>${desc}`);
+        layer.on("dragend", function (e) {
+          const { lat, lng } = e.target.getLatLng();
+          console.log(`Moved to: ${lat}, ${lng}`);
+        });
+        layer.on("contextmenu", function () {
+          map.removeLayer(layer);
+        });
+      },
+      pointToLayer: function (feature, latlng) {
+        return L.marker(latlng, { draggable: true });
+      }
+    }).addTo(map);
+  });
+</script>
 <script>
   let map, currentMarker, clickMarker, accuracyCircle;
   let currentLat = null, currentLon = null;
