@@ -58,6 +58,7 @@
   let currentLat = null, currentLon = null;
   let undoStack = [];
 
+  let geoJsonGroup = null;
   const geoJsonLayers = new Map();
 
   const FORM_POST_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfSsjDS918E6xBcwdyaYF6_8THDgP5swtd7PHx9C6zgdRnC5g/formResponse";
@@ -86,16 +87,19 @@
     }
 
     if (layer) {
-      map.removeLayer(layer);
-      undoStack = undoStack.filter(item => item.layer._leaflet_id !== id);
-
-      if (geoJsonLayers.has(id)) {
+      if (geoJsonGroup && geoJsonGroup.hasLayer(layer)) {
+        geoJsonGroup.removeLayer(layer);
         geoJsonLayers.delete(id);
+        console.log("Deleted marker from GeoJSON group");
+      } else {
+        map.removeLayer(layer);
+        console.log("Deleted standalone marker");
       }
+
+      undoStack = undoStack.filter(item => item.layer._leaflet_id !== id);
 
       if (clickMarker && clickMarker._leaflet_id === id) clickMarker = null;
       document.getElementById("status").textContent = "🗑️ Marker deleted.";
-      console.log("Deleted marker:", layer);
     } else {
       console.warn("Marker to delete not found:", id);
     }
@@ -129,6 +133,7 @@
       const popupNode = e.popup._contentNode;
       const deleteBtn = popupNode.querySelector('.delete-btn');
       if (deleteBtn) {
+        // Remove old listeners to prevent duplicates
         deleteBtn.replaceWith(deleteBtn.cloneNode(true));
         const newDeleteBtn = popupNode.querySelector('.delete-btn');
         newDeleteBtn.addEventListener('click', function() {
@@ -145,7 +150,7 @@
         return res.json();
       })
       .then(data => {
-        L.geoJSON(data, {
+        geoJsonGroup = L.geoJSON(data, {
           onEachFeature: function (feature, layer) {
             const props = feature.properties || {};
             const type = props.type || "UNKNOWN";
