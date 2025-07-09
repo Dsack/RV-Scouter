@@ -1,13 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>RV Location Logger (GPS + Manual Click + Undo)</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #map { height: 400px; width: 100%; border: 1px solid #888; margin-top: 15px; }
+    select, button, textarea { font-size: 16px; padding: 5px; margin-top: 10px; }
+    #noteArea { display: none; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+<h2>📍RV Location Logger</h2>
+
+<label for="type">Select Type:</label>
+<select id="type">
+  <option value="RV">RV</option>
+  <option value="TENT">TENT</option>
+  <option value="STREET ARMOR">STREET ARMOR</option>
+  <option value="WATER SOURCE">WATER SOURCE</option>
+  <option value="BATHROOM">BATHROOM</option>
+</select>
+
+<br>
+<button onclick="toggleNotes()">Add Notes</button>
+<div id="noteArea">
+  <label for="note">Notes:</label><br>
+  <textarea id="note" rows="3" cols="40" placeholder="Optional notes..."></textarea>
+</div>
+
+<br>
+<button onclick="submitCurrentLocation()">Submit Current Location</button>
+<button onclick="submitClickedLocation()">Submit Clicked Point</button>
 <button onclick="undo()">Undo Last Action</button>
-<div id="map" style="height:400px;"></div>
+<p id="status"></p>
+
+<div id="map"></div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
   let map, currentMarker, clickMarker, accuracyCircle;
   let currentLat = null, currentLon = null;
-
-  // Undo stack stores { action: "add"|"delete", layer: marker }
   let undoStack = [];
+
+  const FORM_POST_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfSsjDS918E6xBcwdyaYF6_8THDgP5swtd7PHx9C6zgdRnC5g/formResponse";
+  const TYPE_ENTRY = "entry.1851045738";
+  const LAT_ENTRY = "entry.1397274582";
+  const LON_ENTRY = "entry.1788771684";
+  const NOTE_ENTRY = "entry.1863195655";
 
   function initMap(lat, lon) {
     map = L.map('map').setView([lat, lon], 15);
@@ -17,75 +60,63 @@
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // Add current location marker
     currentMarker = L.marker([lat, lon]).addTo(map)
       .bindPopup("You are here").openPopup();
-    
-    // We don't undo GPS marker moves to keep it simple,
-    // only manual markers are tracked
 
-    // Add click handler to place draggable marker
     map.on("click", function(e) {
-      if (clickMarker) {
-        // Removing old clicked marker triggers undo record for delete
-        deleteMarker(clickMarker);
-      }
-      clickMarker = L.marker(e.latlng, { draggable: true }).addTo(map)
+      const marker = L.marker(e.latlng, { draggable: true }).addTo(map)
         .bindPopup("📌 Clicked Point").openPopup();
 
-      // Track this add
-      undoStack.push({ action: 'add', layer: clickMarker });
+      marker.on("contextmenu", () => confirmAndDelete(marker));
 
-      // Optional: On drag end, update popup or something else here
+      undoStack.push({ action: 'add', layer: marker });
+      clickMarker = marker;
     });
+
+    // Load GeoJSON once map is ready
+    fetch("data.geojson")
+      .then(res => {
+        if (!res.ok) throw new Error("GeoJSON load failed");
+        return res.json();
+      })
+      .then(data => {
+        L.geoJSON(data, {
+          onEachFeature: function (feature, layer) {
+            const props = feature.properties || {};
+            const type = props.type || "UNKNOWN";
+            const desc = props.description || "";
+
+            layer.bindPopup(`<strong>${type}</strong><br>${desc}`);
+            layer.on("contextmenu", () => confirmAndDelete(layer));
+          },
+          pointToLayer: function (feature, latlng) {
+            return L.marker(latlng, { draggable: true });
+          }
+        }).addTo(map);
+      })
+      .catch(err => {
+        console.error("Error loading GeoJSON:", err);
+      });
   }
 
-  // Deletes a marker with confirmation, pushes delete action to undo stack
-  function deleteMarker(marker) {
-    if (!confirm("Are you sure you want to delete this marker?")) return;
-    map.removeLayer(marker);
-    undoStack.push({ action: 'delete', layer: marker });
-  }
-
-  // Undo last add or delete
-  function undo() {
-    if (undoStack.length === 0) {
-      alert("Nothing to undo.");
-      return;
-    }
-    const lastAction = undoStack.pop();
-
-    if (lastAction.action === 'add') {
-      // Undo add = remove the marker from map
-      map.removeLayer(lastAction.layer);
-      // If this was clickMarker, clear it
-      if (lastAction.layer === clickMarker) {
-        clickMarker = null;
-      }
-    } else if (lastAction.action === 'delete') {
-      // Undo delete = add the marker back to map
-      lastAction.layer.addTo(map);
-      // If it's a clicked marker, reassign clickMarker
-      clickMarker = lastAction.layer;
-    }
-  }
-
-  // Update the GPS location marker; this one is NOT tracked for undo
   function updateCurrentLocation(lat, lon, accuracy) {
     currentLat = lat;
     currentLon = lon;
+
     if (!map) {
       initMap(lat, lon);
     } else {
       currentMarker.setLatLng([lat, lon]);
       map.setView([lat, lon]);
     }
+
     if (accuracyCircle) map.removeLayer(accuracyCircle);
     accuracyCircle = L.circle([lat, lon], {
       radius: accuracy,
       color: 'blue',
       fillOpacity: 0.1
     }).addTo(map);
+
     document.getElementById("status").textContent =
       `Live GPS: Lat ${lat.toFixed(5)}, Lon ${lon.toFixed(5)} (±${Math.round(accuracy)}m)`;
   }
@@ -97,6 +128,29 @@
       { enableHighAccuracy: true }
     );
   } else {
-    alert("Geolocation is not supported by your browser.");
+    alert("Geolocation is not supported.");
   }
-</script>
+
+  function confirmAndDelete(marker) {
+    if (confirm("Delete this marker?")) {
+      map.removeLayer(marker);
+      undoStack.push({ action: "delete", layer: marker });
+      if (clickMarker === marker) clickMarker = null;
+    }
+  }
+
+  function undo() {
+    if (undoStack.length === 0) {
+      alert("Nothing to undo.");
+      return;
+    }
+
+    const last = undoStack.pop();
+
+    if (last.action === "add") {
+      map.removeLayer(last.layer);
+      if (clickMarker === last.layer) clickMarker = null;
+    } else if (last.action === "delete") {
+      last.layer.addTo(map);
+      last.layer.on("contextmenu", () => confirmAndDelete(last.layer));
+      clickMarker = last.layer;
