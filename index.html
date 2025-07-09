@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>RV Location Logger (GPS + Manual Click + Undo)</title>
+  <title>RV Location Logger (GPS + Manual Click + Undo + Delete in Popup)</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
@@ -10,6 +10,19 @@
     #map { height: 400px; width: 100%; border: 1px solid #888; margin-top: 15px; }
     select, button, textarea { font-size: 16px; padding: 5px; margin-top: 10px; }
     #noteArea { display: none; margin-top: 10px; }
+    /* Style for popup delete button */
+    .delete-btn {
+      margin-top: 8px;
+      background-color: #e74c3c;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    .delete-btn:hover {
+      background-color: #c0392b;
+    }
   </style>
 </head>
 <body>
@@ -52,6 +65,29 @@
   const LON_ENTRY = "entry.1788771684";
   const NOTE_ENTRY = "entry.1863195655";
 
+  // Helper: bind popup with Delete button to marker
+  function bindPopupWithDelete(marker, type, note) {
+    const safeNote = note ? note.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") : "";
+    const popupContent = `
+      <strong>${type}</strong><br>
+      ${safeNote}
+      <br><button class="delete-btn" onclick="deleteMarker(${marker._leaflet_id})">Delete</button>
+    `;
+    marker.bindPopup(popupContent);
+  }
+
+  // Delete marker by leaflet id
+  function deleteMarker(id) {
+    const layer = map._layers[id];
+    if (layer) {
+      map.removeLayer(layer);
+      // Remove from undo stack if exists
+      undoStack = undoStack.filter(item => item.layer._leaflet_id !== id);
+      if (clickMarker && clickMarker._leaflet_id === id) clickMarker = null;
+      document.getElementById("status").textContent = "🗑️ Marker deleted.";
+    }
+  }
+
   function initMap(lat, lon) {
     map = L.map('map').setView([lat, lon], 15);
 
@@ -64,14 +100,12 @@
       .bindPopup("You are here").openPopup();
 
     map.on("click", function(e) {
-      const marker = L.marker(e.latlng, { draggable: true }).addTo(map);
+      const type = document.getElementById("type").value;
+      const note = document.getElementById("note").value;
 
-      // On click, show popup with type & note from inputs
-      marker.on("click", () => {
-        const type = document.getElementById("type").value;
-        const note = document.getElementById("note").value;
-        marker.bindPopup(`<strong>${type}</strong><br>${note}`).openPopup();
-      });
+      const marker = L.marker(e.latlng, { draggable: true }).addTo(map);
+      bindPopupWithDelete(marker, type, note);
+      marker.openPopup();
 
       undoStack.push({ action: 'add', layer: marker });
       clickMarker = marker;
@@ -90,10 +124,9 @@
             const type = props.type || "UNKNOWN";
             const desc = props.description || "";
 
-            // Show popup on click with properties
-            layer.on("click", () => {
-              layer.bindPopup(`<strong>${type}</strong><br>${desc}`).openPopup();
-            });
+            if (feature.geometry.type === "Point") {
+              bindPopupWithDelete(layer, type, desc);
+            }
           },
           pointToLayer: function (feature, latlng) {
             return L.marker(latlng, { draggable: true });
@@ -155,6 +188,7 @@
     if (last.action === "add") {
       map.removeLayer(last.layer);
       if (clickMarker === last.layer) clickMarker = null;
+      document.getElementById("status").textContent = "↩️ Undo: Marker removed.";
     }
   }
 
