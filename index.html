@@ -73,7 +73,7 @@
       clickMarker = marker;
     });
 
-    // Load GeoJSON once map is ready
+    // Load GeoJSON
     fetch("data.geojson")
       .then(res => {
         if (!res.ok) throw new Error("GeoJSON load failed");
@@ -87,10 +87,19 @@
             const desc = props.description || "";
 
             layer.bindPopup(`<strong>${type}</strong><br>${desc}`);
-            layer.on("contextmenu", () => confirmAndDelete(layer));
+            if (feature.geometry.type === "Point") {
+              layer.on("contextmenu", () => confirmAndDelete(layer));
+            }
           },
           pointToLayer: function (feature, latlng) {
             return L.marker(latlng, { draggable: true });
+          },
+          style: function (feature) {
+            if (feature.geometry.type === "Polygon") {
+              return { color: "purple", fillOpacity: 0.2 };
+            } else if (feature.geometry.type === "LineString") {
+              return { color: "orange", weight: 3 };
+            }
           }
         }).addTo(map);
       })
@@ -154,3 +163,52 @@
       last.layer.addTo(map);
       last.layer.on("contextmenu", () => confirmAndDelete(last.layer));
       clickMarker = last.layer;
+    }
+  }
+
+  function toggleNotes() {
+    const area = document.getElementById("noteArea");
+    area.style.display = area.style.display === "none" ? "block" : "none";
+  }
+
+  function submitToForm(lat, lon) {
+    const type = document.getElementById("type").value;
+    const note = document.getElementById("note").value;
+
+    const formData = new FormData();
+    formData.append(TYPE_ENTRY, type);
+    formData.append(LAT_ENTRY, lat);
+    formData.append(LON_ENTRY, lon);
+    formData.append(NOTE_ENTRY, note);
+
+    fetch(FORM_POST_URL, {
+      method: "POST",
+      mode: "no-cors",
+      body: formData
+    }).then(() => {
+      document.getElementById("status").textContent = "✅ Submitted!";
+      document.getElementById("note").value = "";
+    }).catch(err => {
+      document.getElementById("status").textContent = "❌ Failed: " + err;
+    });
+  }
+
+  function submitCurrentLocation() {
+    if (currentLat === null || currentLon === null) {
+      document.getElementById("status").textContent = "⚠️ Current location not available.";
+      return;
+    }
+    submitToForm(currentLat, currentLon);
+  }
+
+  function submitClickedLocation() {
+    if (!clickMarker) {
+      document.getElementById("status").textContent = "⚠️ No point selected on map.";
+      return;
+    }
+    const { lat, lng } = clickMarker.getLatLng();
+    submitToForm(lat, lng);
+  }
+</script>
+</body>
+</html>
